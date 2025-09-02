@@ -1,8 +1,9 @@
-from pathlib import Path
-from PIL import Image
 import boto3
+import re
+from datetime import datetime
+from pathlib import Path
 
-receipts_folder = Path('test')
+receipts_folder = Path('test2')
 image_extensions = ['.png', '.jpg', '.jpeg']
 textract = boto3.client('textract', region_name='ap-southeast-2') #Sydney region
 
@@ -23,20 +24,48 @@ def extract_company_name(lines):
     #Last resort: assume the first line is the company name
     return lines[0].strip() if lines else ""
 
-import re
-
 def extract_date(lines):
-    #Common date patterns: DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD, etc.
+    #Initialise regex expression for date and time patterns
     date_patterns = [
-        r'\b\d{2}[/-]\d{2}[/-]\d{4}\b',
-        r'\b\d{4}[/-]\d{2}[/-]\d{2}\b',
-        r'\b\d{2} [A-Za-z]{3,9} \d{4}\b',
+        r'(\d{2}[/-]\d{2}[/-]\d{4})', #12-07-2025 or 12/07/2025
+        r'(\d{4}[/-]\d{2}[/-]\d{2})', #2025-07-12 or 2025/07/12
+        r'(\d{2} [A-Za-z]{3,9} \d{4})', #12 JULY 2025
+        r'(\d{2}[A-Za-z]{3}\d{4})',  #12JUL2025
     ]
+    time_patterns = [r'(\d{2}:\d{2})', r'(\d{2}:\d{2}:\d{2})']
+    found_date = None
+    found_time = "00:00"
+
     for line in lines:
+        #Find date
         for pattern in date_patterns:
-            match = re.search(pattern, line)
+            match = re.search(pattern, line, re.IGNORECASE)
             if match:
-                return match.group()
+                found_date = match.group(1)
+                #print(f"Found date: {found_date}")
+                break
+        #Find time
+        for tpattern in time_patterns:
+            tmatch = re.search(tpattern, line)
+            if tmatch:
+                found_time = tmatch.group(1)
+                #print(f"Found time: {found_time}")
+                break
+        if found_date:
+            break
+
+    if found_date:       
+        # Try parsing date
+        for fmt in ["%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%Y/%m/%d", "%d %B %Y", "%d %b %Y", "%d%b%Y"]:
+            try:
+                dt = datetime.strptime(found_date, fmt)
+                # Format as DD-MM-YYYY:HH:mm
+                # If time is in HH:mm:ss, take only HH:mm
+                if len(found_time) == 8:
+                    found_time = found_time[:5]
+                return dt.strftime("%d-%m-%Y") + ":" + found_time
+            except ValueError:
+                continue
     return ""
 
 def extract_amount(lines):
