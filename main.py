@@ -3,9 +3,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 from openpyxl import Workbook
-import json
 
-receipts_folder = Path('test')
+receipts_folder = Path('images')
 image_extensions = ['.png', '.jpg', '.jpeg']
 textract = boto3.client('textract', region_name='ap-southeast-2') #Sydney region
 output_file = "receipts_output.xlsx"
@@ -83,7 +82,6 @@ def extract_date(lines):
                 # If time is in HH:mm:ss, take only HH:mm
                 if len(found_time) > 5:
                     found_time = found_time[:5]
-                print(f"Parsed date: {dt.strftime('%d-%m-%Y')} Time: {found_time}")
                 return dt.strftime("%d-%m-%Y") + ":" + found_time
             except ValueError:
                 continue
@@ -100,7 +98,7 @@ def extract_amount(lines):
         matches = re.findall(amount_pattern, line)
         for amt in matches:
             all_amounts.append(amt)
-        # Check for keywords in line (case-insensitive)
+        # Check for keywords in line
         if any(k in line.lower() for k in keywords):
             for amt in matches:
                 keyword_amounts.append(amt)

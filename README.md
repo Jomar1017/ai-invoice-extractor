@@ -9,7 +9,7 @@ Outputs the structured data into Excel file.
 - Saves extracted data to Excel
 
 ## Usage
-1. Place receipt images in test folder
+1. Place receipt images in images folder
 2. Configure AWS credentials ('aws configure') - Make sure AWS credentials has AWSTextractFullPolicy configured
 3. Run main.py
 4. Check the 'receipts_output.xlsx' file
