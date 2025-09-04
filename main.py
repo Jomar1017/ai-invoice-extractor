@@ -3,6 +3,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from openpyxl import Workbook
+import json
 
 receipts_folder = Path('test')
 image_extensions = ['.png', '.jpg', '.jpeg']
@@ -27,17 +28,15 @@ def extract_company_name(lines):
     #Check for keywords in the first few lines of the receipt
     for line in lines:
         if any(keyword in line for keyword in ["Company", "Inc.", "LLC", "Ltd"]):
-            #print(f"Found company line: {line}")
             return line.strip()
     
     #If no company found from keywords, check against known companies
     for line in lines:
         for known_company in known_companies:
             if known_company.lower() in line.lower():
-                #print(f"Matched known company: {line.strip()}")
                 return known_company
     
-    #Last resort: assume the first line is the company name
+    #Last resort: Assume the first line is the company name
     return lines[0].strip() if lines else ""
 
 def extract_date(lines):
@@ -49,40 +48,42 @@ def extract_date(lines):
         r'(\d{1,2}[A-Za-z]{3}\d{4})',  #12JUL2025
     ]
     time_patterns = [
-        r'(\d{1,2}:\d{2}\s?(?:am|pm|AM|PM))', #8:53 am, 12:05 PM
+        r'(\d{1,2}[:.]\d{2}\s?(?:a\.?m\.?|p\.?m\.?|AM|PM))', #8:53 am, 12:05 PM, 8.53a.m., 12.05P.M.
         r'(\d{1,2}:\d{2})', #14:30
         r'(\d{1,2}:\d{2}:\d{2})' #14:30:15
     ]
     found_date = None
-    found_time = "00:00"
+    found_time = None
 
     for line in lines:
         #Find date
-        for pattern in date_patterns:
-            match = re.search(pattern, line, re.IGNORECASE)
-            if match:
-                found_date = match.group(1)
-                #print(f"Found date: {found_date}")
-                break
+        if not found_date:
+            for pattern in date_patterns:
+                match = re.search(pattern, line, re.IGNORECASE)
+                if match:
+                    found_date = match.group(1)
+                    break
         #Find time
-        for tpattern in time_patterns:
-            tmatch = re.search(tpattern, line)
-            if tmatch:
-                found_time = tmatch.group(1)
-                #print(f"Found time: {found_time}")
-                break
-        if found_date:
+        if not found_time:
+            for tpattern in time_patterns:
+                tmatch = re.search(tpattern, line, re.IGNORECASE)
+                if tmatch:
+                    found_time = tmatch.group(1)
+                    break
+        #If both date and time found, exit loop
+        if found_date and found_time:
             break
 
     if found_date:       
-        # Try parsing date
+        # Parse date format
         for fmt in ["%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%Y/%m/%d", "%d %B %Y", "%d %b %Y", "%d%b%Y"]:
             try:
                 dt = datetime.strptime(found_date, fmt)
                 # Format as DD-MM-YYYY:HH:mm
                 # If time is in HH:mm:ss, take only HH:mm
-                if len(found_time) == 8:
+                if len(found_time) > 5:
                     found_time = found_time[:5]
+                print(f"Parsed date: {dt.strftime('%d-%m-%Y')} Time: {found_time}")
                 return dt.strftime("%d-%m-%Y") + ":" + found_time
             except ValueError:
                 continue
@@ -103,7 +104,7 @@ def extract_amount(lines):
         if any(k in line.lower() for k in keywords):
             for amt in matches:
                 keyword_amounts.append(amt)
-                
+
     # Prefer amounts found in keyword lines
     amounts = keyword_amounts if keyword_amounts else all_amounts
     if amounts:
@@ -129,11 +130,7 @@ def extract_text_from_image(image_path):
     amount = extract_amount(lines)
     filename = Path(image_path).name
     results.append([filename, company, date, amount])
-    #print(f"Company: {company}")
-    #print(f"Date: {date}")
-    #print(f"Amount: {amount}")
     write_to_file(results, output_file)
-    #return lines
 
 #Main function to test the extractor
 def main():
