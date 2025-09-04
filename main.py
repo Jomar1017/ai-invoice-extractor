@@ -2,23 +2,39 @@ import boto3
 import re
 from datetime import datetime
 from pathlib import Path
+from openpyxl import Workbook
 
-receipts_folder = Path('test2')
+receipts_folder = Path('test')
 image_extensions = ['.png', '.jpg', '.jpeg']
 textract = boto3.client('textract', region_name='ap-southeast-2') #Sydney region
+output_file = "receipts_output.xlsx"
+results = []
+
+#Function to write the extracted data to Excel file
+def write_to_file(data, output_file):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Receipts"
+    ws.append(["Filename", "Company Name", "Date", "Amount"])
+    for row in data:
+        ws.append(row)
+    wb.save(output_file)
+    print(f"Data written to {output_file}")
 
 #Placeholder function for extracting company name
 def extract_company_name(lines):
-    known_companies = ['Woolworths', 'Coles', 'Officeworks', 'JB Hi-Fi', 'Bunnings', 'Kmart', 'BP', 'Spicer']
+    known_companies = ['Woolworths', 'Mitre 10', 'Officeworks', 'JB Hi-Fi', 'Bunnings', 'Kmart', 'BP', 'BP Connect', 'Spicer']
     #Check for keywords in the first few lines of the receipt
     for line in lines:
-        if any(keyword in line for keyword in ["Company", "Inc", "LLC", "Ltd", "CO"]):
+        if any(keyword in line for keyword in ["Company", "Inc.", "LLC", "Ltd"]):
+            #print(f"Found company line: {line}")
             return line.strip()
     
     #If no company found from keywords, check against known companies
     for line in lines:
         for known_company in known_companies:
             if known_company.lower() in line.lower():
+                #print(f"Matched known company: {line.strip()}")
                 return known_company
     
     #Last resort: assume the first line is the company name
@@ -29,10 +45,14 @@ def extract_date(lines):
     date_patterns = [
         r'(\d{2}[/-]\d{2}[/-]\d{4})', #12-07-2025 or 12/07/2025
         r'(\d{4}[/-]\d{2}[/-]\d{2})', #2025-07-12 or 2025/07/12
-        r'(\d{2} [A-Za-z]{3,9} \d{4})', #12 JULY 2025
-        r'(\d{2}[A-Za-z]{3}\d{4})',  #12JUL2025
+        r'(\d{1,2} [A-Za-z]{3,9} \d{4})', #12 JULY 2025
+        r'(\d{1,2}[A-Za-z]{3}\d{4})',  #12JUL2025
     ]
-    time_patterns = [r'(\d{2}:\d{2})', r'(\d{2}:\d{2}:\d{2})']
+    time_patterns = [
+        r'(\d{1,2}:\d{2}\s?(?:am|pm|AM|PM))', #8:53 am, 12:05 PM
+        r'(\d{1,2}:\d{2})', #14:30
+        r'(\d{1,2}:\d{2}:\d{2})' #14:30:15
+    ]
     found_date = None
     found_time = "00:00"
 
@@ -69,36 +89,53 @@ def extract_date(lines):
     return ""
 
 def extract_amount(lines):
-    #Initialise pattern for amount, ex: $90.99 or 90.99
-    amount_pattern = r'\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})'
-    amounts = []
+    # List of Keywords to look for in lines that likely contain the total amount
+    keywords = ['total', 'total incl gst', 'total amount', 'amount due', 'grand total', 'balance due']
+    amount_pattern = r'\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})' #ex: $1,234.56 or 1234.56
+    keyword_amounts = []
+    all_amounts = []
+
     for line in lines:
         matches = re.findall(amount_pattern, line)
         for amt in matches:
-            amounts.append(amt)
-    
-    #Select only the largest amount if multiple amount found
+            all_amounts.append(amt)
+        # Check for keywords in line (case-insensitive)
+        if any(k in line.lower() for k in keywords):
+            for amt in matches:
+                keyword_amounts.append(amt)
+                
+    # Prefer amounts found in keyword lines
+    amounts = keyword_amounts if keyword_amounts else all_amounts
     if amounts:
-        #Clean amount -  Remove $ and , for comparison
-        cleaned = [float(a.replace('$','').replace(',','')) for a in amounts]
+        cleaned = []
+        for amt in amounts:
+            val = float(amt.replace('$','').replace(',',''))
+            if val not in cleaned:
+                cleaned.append(val)
+     
         max_index = cleaned.index(max(cleaned))
-        return amounts[max_index]
+        return cleaned[max_index]
     return ""
 
 def extract_text_from_image(image_path):
     with open(image_path, 'rb') as document:
         image_bytes = document.read()
+
     response = textract.detect_document_text(Document={'Bytes': image_bytes})
     lines = [item['Text'] for item in response['Blocks'] if item['BlockType'] == 'LINE']
+
     company = extract_company_name(lines)
     date = extract_date(lines)
     amount = extract_amount(lines)
-    print(f"Company: {company}")
-    print(f"Date: {date}")
-    print(f"Amount: {amount}")
-    return lines
+    filename = Path(image_path).name
+    results.append([filename, company, date, amount])
+    #print(f"Company: {company}")
+    #print(f"Date: {date}")
+    #print(f"Amount: {amount}")
+    write_to_file(results, output_file)
+    #return lines
 
-# Main function to test the image iteration
+#Main function to test the extractor
 def main():
     for image_file in receipts_folder.iterdir():
         if image_file.suffix.lower() in ['.png', '.jpg', '.jpeg']:
